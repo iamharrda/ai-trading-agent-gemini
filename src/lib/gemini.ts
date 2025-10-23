@@ -20,7 +20,7 @@ export async function generateTradingSignal(
 ): Promise<TradingSignal> {
 	try {
 		const genAI = getGeminiClient();
-		const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+		const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 
 		const prompt = createAnalysisPrompt(
 			symbol,
@@ -63,32 +63,16 @@ ${
 	.join('')}`
 		: '';
 
-	return `You are a crypto trading analyst specializing in social data signals. Analyze the following LunarCrush social metrics for ${symbol} and provide a trading signal.
+	return `Analyze ${symbol} social metrics and generate a trading signal.
 
-FOCUS ON THESE UNIQUE LUNARCRUSH DIFFERENTIATORS (not sentiment - everyone has that):
+Metrics:
+- Mentions: ${current.mentions.toLocaleString()} | Interactions: ${current.interactions.toLocaleString()} | Creators: ${current.creators.toLocaleString()}
+- AltRank: ${current.altRank} (lower=better) | Galaxy Score: ${current.galaxyScore}/100${historicalContext}
 
-Current Metrics for ${symbol}:
-- Social Mentions: ${current.mentions.toLocaleString()} posts in 24h
-- Total Interactions: ${current.interactions.toLocaleString()} engagements
-- Unique Creators: ${current.creators.toLocaleString()} content creators
-- AltRank: ${current.altRank} (lower = better, proprietary ranking)
-- Galaxy Score: ${
-		current.galaxyScore
-	}/100 (LunarCrush health indicator)${historicalContext}
-
-ANALYSIS FRAMEWORK:
-1. **Social Volume Surge**: High mentions + interactions = increased attention
-2. **Creator Diversity**: More unique creators = broader interest, less manipulation
-3. **AltRank Position**: Lower rank = stronger market + social performance
-4. **Galaxy Score Health**: Higher score = better ecosystem health
-5. **Engagement Quality**: Interactions per mention ratio (quality vs quantity)
-
-Generate a trading signal with this EXACT format:
+Respond in EXACT format:
 SIGNAL: [BUY/SELL/HOLD]
 CONFIDENCE: [0-100]
-REASONING: [2-3 sentences explaining the decision focusing on the metrics above]
-
-Keep reasoning concise and focus on what makes LunarCrush data unique vs other APIs.`;
+REASONING: [1-2 sentences on key factors]`;
 }
 
 /**
@@ -182,7 +166,7 @@ function createFallbackSignal(
 export async function testGeminiConnection(): Promise<boolean> {
 	try {
 		const genAI = getGeminiClient();
-		const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+		const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 
 		const result = await model.generateContent(
 			'Hello, this is a test. Please respond with "Connection successful!"'

@@ -544,8 +544,8 @@ const TriggerPanel: React.FC<{
 						<div className='flex items-start space-x-2'>
 							<span className='text-blue-400 font-bold'>1.</span>
 							<span>
-								<strong>5 Cryptocurrencies:</strong> Analyzes BTC, ETH, SOL,
-								ADA, DOT (one signal per coin)
+								<strong>Smart Selection:</strong> Tests top 10 coins by AltRank™,
+								selects first 3 with complete social data (mentions, interactions, creators)
 							</span>
 						</div>
 						<div className='flex items-start space-x-2'>
@@ -658,11 +658,12 @@ export default function AITradingDashboard() {
 			const response = await fetch('/api/trigger', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ symbols: ['BTC', 'ETH', 'SOL', 'ADA', 'DOT'] }),
+				body: JSON.stringify({}), // Smart selection: top 10 candidates → best 3 with data
 			});
 
 			if (response.ok) {
 				const result = await response.json();
+				console.log('Analysis triggered for symbols:', result.symbols);
 
 				if (result.jobId) {
 					setCurrentJobId(result.jobId);
@@ -896,8 +897,7 @@ export default function AITradingDashboard() {
 											Latest Trading Signals
 										</h2>
 										<p className='text-gray-400 text-sm'>
-											Showing {Math.min(signals.length, 10)} most recent signals
-											from database
+											Showing {signals.length} most recent signals from database
 											{lastUpdate &&
 												` • Last updated: ${lastUpdate.toLocaleTimeString()}`}
 										</p>
@@ -905,7 +905,7 @@ export default function AITradingDashboard() {
 								</div>
 
 								<div className='grid grid-cols-1 xl:grid-cols-2 gap-6'>
-									{signals.slice(0, 10).map((signal) => (
+									{signals.map((signal) => (
 										<SignalCard key={signal.id} signal={signal} />
 									))}
 								</div>

@@ -81,72 +81,36 @@ interface TopicResponse {
 }
 
 /**
- * Fetch comprehensive social metrics for a symbol
- * Combines coins/list data (altRank, galaxyScore) with topic data (creators, mentions, interactions)
+ * Fetch comprehensive social metrics for a top coin
+ * Combines pre-fetched coin data (altRank, galaxyScore) with live topic data (creators, mentions, interactions)
  */
-export async function getSocialMetrics(symbol: string): Promise<SocialMetrics> {
+export async function getSocialMetrics(coin: TopCoin): Promise<SocialMetrics> {
 	try {
-		// Fetch both endpoints in parallel
-		const [coinsData, topicData] = await Promise.all([
-			fetchCoinsListData(symbol),
-			fetchTopicData(symbol),
-		]);
+		console.log(`🔍 Fetching social metrics for: ${coin.symbol}`);
+
+		// Only need to fetch topic data - coin data is already available
+		const topicData = await fetchTopicData(coin.symbol);
 
 		const metrics: SocialMetrics = {
-			symbol: symbol.toUpperCase(),
+			symbol: coin.symbol,
 			mentions: topicData.num_posts || 0,
 			interactions: topicData.interactions_24h || 0,
 			creators: topicData.num_contributors || 0,
-			altRank: coinsData.alt_rank || 999,
-			galaxyScore: coinsData.galaxy_score || 0,
+			altRank: coin.altRank,
+			galaxyScore: coin.galaxyScore,
 			timestamp: Date.now(),
 		};
 
+		console.log(`✅ Metrics for ${coin.symbol}:`, {
+			mentions: metrics.mentions,
+			interactions: metrics.interactions,
+			creators: metrics.creators,
+		});
+
 		return metrics;
 	} catch (error) {
-		console.error(`Failed to fetch social metrics for ${symbol}:`, error);
+		console.error(`Failed to fetch social metrics for ${coin.symbol}:`, error);
 		throw error;
-	}
-}
-
-/**
- * Fetch data from coins/list endpoint (altRank, galaxyScore)
- */
-async function fetchCoinsListData(
-	targetSymbol: string
-): Promise<{ alt_rank: number; galaxy_score: number }> {
-	try {
-		const response = await makeRequest<CoinsListResponse>(
-			'/coins/list/v1?limit=500&sort=alt_rank'
-		);
-
-		// Find the target symbol in the list
-		let coinData = response.data.find(
-			(coin) => coin.symbol.toUpperCase() === targetSymbol.toUpperCase()
-		);
-
-		// Handle Bitcoin variations
-		if (!coinData && targetSymbol.toUpperCase() === 'BTC') {
-			coinData = response.data.find(
-				(coin) =>
-					coin.symbol.toUpperCase() === 'BITCOIN' ||
-					coin.symbol.toLowerCase() === 'bitcoin' ||
-					coin.name?.toLowerCase().includes('bitcoin')
-			);
-		}
-
-		if (!coinData) {
-			console.warn(`Symbol ${targetSymbol} not found in coins list`);
-			return { alt_rank: 999, galaxy_score: 0 };
-		}
-
-		return {
-			alt_rank: coinData.alt_rank,
-			galaxy_score: coinData.galaxy_score,
-		};
-	} catch (error) {
-		console.error('Error fetching coins list data:', error);
-		return { alt_rank: 999, galaxy_score: 0 };
 	}
 }
 
@@ -159,15 +123,32 @@ async function fetchTopicData(symbol: string): Promise<{
 	num_contributors: number;
 }> {
 	try {
+		console.log(`📡 Requesting topic data for: ${symbol} from /topic/${symbol}/v1`);
 		const response = await makeRequest<TopicResponse>(`/topic/${symbol}/v1`);
 
-		return {
+		// Log full response to see what we're getting
+		console.log(`📊 Full API response for ${symbol}:`, JSON.stringify(response, null, 2));
+
+		// Validate we got actual data
+		if (!response.data) {
+			console.warn(`⚠️ No data object in response for ${symbol}`);
+			throw new Error(`No topic data returned for ${symbol}`);
+		}
+
+		const topicData = {
 			num_posts: response.data.num_posts || 0,
 			interactions_24h: response.data.interactions_24h || 0,
 			num_contributors: response.data.num_contributors || 0,
 		};
+
+		console.log(`✅ Parsed topic data for ${symbol}:`, topicData);
+
+		return topicData;
 	} catch (error) {
-		console.error(`Error fetching topic data for ${symbol}:`, error);
+		console.error(`❌ Error fetching topic data for ${symbol}:`, error);
+		console.error(`Error details:`, error instanceof Error ? error.message : 'Unknown error');
+		// Return zeros but log which symbol failed
+		console.warn(`⚠️ ${symbol} topic data unavailable - returning zeros`);
 		return {
 			num_posts: 0,
 			interactions_24h: 0,
@@ -177,14 +158,65 @@ async function fetchTopicData(symbol: string): Promise<{
 }
 
 /**
+ * Coin data structure returned by getTopCoinsByAltRank
+ */
+export interface TopCoin {
+	symbol: string;
+	name: string;
+	altRank: number;
+	galaxyScore: number;
+	price: number;
+	marketCap: number;
+	percentChange24h: number;
+}
+
+/**
+ * Get top N coins sorted by AltRank
+ * Returns full coin data (no need for lookups later)
+ */
+export async function getTopCoinsByAltRank(limit: number = 10): Promise<TopCoin[]> {
+	const response = await makeRequest<CoinsListResponse>(
+		`/coins/list/v1?limit=${limit}&sort=alt_rank`
+	);
+
+	// Transform API response to our coin structure
+	const topCoins: TopCoin[] = response.data.map((coin) => ({
+		symbol: coin.symbol.toUpperCase(),
+		name: coin.name,
+		altRank: coin.alt_rank,
+		galaxyScore: coin.galaxy_score,
+		price: coin.price,
+		marketCap: coin.market_cap,
+		percentChange24h: coin.percent_change_24h,
+	}));
+
+	console.log(
+		`Fetched top ${limit} coins by AltRank:`,
+		topCoins.map((c) => c.symbol)
+	);
+
+	return topCoins;
+}
+
+/**
  * Test LunarCrush API integration
  */
 export async function testLunarCrushIntegration(): Promise<boolean> {
 	try {
-		const btcMetrics = await getSocialMetrics('BTC');
+		// Fetch top coins
+		const topCoins = await getTopCoinsByAltRank(5);
 
-		const hasCoinsData = btcMetrics.altRank < 999 && btcMetrics.galaxyScore > 0;
-		const hasTopicData = btcMetrics.mentions > 0 && btcMetrics.interactions > 0;
+		if (topCoins.length === 0) {
+			console.error('Failed to fetch top coins');
+			return false;
+		}
+
+		// Test with first coin in the list
+		const testCoin = topCoins[0];
+		const metrics = await getSocialMetrics(testCoin);
+
+		const hasCoinsData = metrics.altRank > 0 && metrics.galaxyScore > 0;
+		const hasTopicData = metrics.mentions > 0 && metrics.interactions > 0;
 
 		if (hasCoinsData && hasTopicData) {
 			console.log('LunarCrush integration test successful');

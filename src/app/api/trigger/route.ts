@@ -1,21 +1,27 @@
 import { inngest } from '@/lib/inngest';
+import { getTopCoinsByAltRank } from '@/lib/lunarcrush';
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
 	try {
 		const body = await request.json();
-		const { symbols } = body;
+		// Always fetch top 10 as candidates (we'll select best 3 with complete data)
+		const candidateCount = 10;
 
 		// Generate unique job ID
 		const jobId = `job_${Date.now()}_${Math.random()
 			.toString(36)
 			.substr(2, 9)}`;
 
-		// Prepare event data for Inngest
+		// Fetch top 10 coins by AltRank as candidates
+		console.log(`Fetching top ${candidateCount} coins by AltRank as candidates...`);
+		const topCoins = await getTopCoinsByAltRank(candidateCount);
+		console.log(`Got ${topCoins.length} candidate coins:`, topCoins.map(c => c.symbol));
+
+		// Prepare event data for Inngest (pass full coin objects)
 		const eventData = {
 			jobId: jobId,
-			symbols: symbols || ['BTC', 'ETH', 'SOL', 'ADA', 'DOT'],
-			symbolCount: 5,
+			topCoins: topCoins, // Pass complete coin data (no lookups needed)
 			timestamp: Date.now(),
 			triggerType: 'manual',
 		};
@@ -30,7 +36,8 @@ export async function POST(request: NextRequest) {
 			success: true,
 			jobId: jobId,
 			eventId: eventId,
-			message: 'Analysis job queued successfully',
+			symbols: topCoins.map(c => c.symbol),
+			message: `Analysis job queued for top ${topCoins.length} coins by AltRank`,
 		});
 	} catch (error) {
 		console.error('Failed to trigger analysis:', error);

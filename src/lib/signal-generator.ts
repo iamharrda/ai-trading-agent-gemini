@@ -1,31 +1,43 @@
 // src/lib/signal-generator.ts - Signal Generation & Database Operations
-import { getSocialMetrics } from '@/lib/lunarcrush';
+import { getSocialMetrics, getTopCoinsByAltRank, type TopCoin } from '@/lib/lunarcrush';
 import { generateTradingSignal } from '@/lib/gemini';
 import { supabase } from '@/lib/supabase';
 import type { SocialMetrics, TradingSignal } from '@/types/trading';
 
 /**
  * Generate trading signal for a single symbol
- * Combines LunarCrush data fetching with AI analysis
+ * Only works with top-ranked coins (fetches top coins list first)
  */
 export async function generateSignalForSymbol(
 	symbol: string
 ): Promise<TradingSignal> {
 	try {
-		// Step 1: Fetch current social metrics from LunarCrush
-		const currentMetrics = await getSocialMetrics(symbol);
+		// Step 1: Fetch top coins to find the requested symbol
+		const topCoins = await getTopCoinsByAltRank(100); // Fetch more to ensure we have the symbol
 
-		// Step 2: Get historical data for trend analysis
+		// Find the coin in the top coins list
+		const coin = topCoins.find(c => c.symbol === symbol.toUpperCase());
+
+		if (!coin) {
+			throw new Error(
+				`Symbol ${symbol} is not in the top 100 coins by AltRank. Only top-ranked coins are supported.`
+			);
+		}
+
+		// Step 2: Fetch current social metrics (no lookups - coin data already available)
+		const currentMetrics = await getSocialMetrics(coin);
+
+		// Step 3: Get historical data for trend analysis
 		const historicalMetrics = await getHistoricalMetrics(symbol, 5);
 
-		// Step 3: Generate AI-powered trading signal
+		// Step 4: Generate AI-powered trading signal
 		const signal = await generateTradingSignal(
 			symbol,
 			currentMetrics,
 			historicalMetrics
 		);
 
-		// Step 4: Save signal to database
+		// Step 5: Save signal to database
 		await saveSignalToDatabase(signal);
 
 		return signal;
@@ -115,11 +127,19 @@ export async function getLatestSignals(
  */
 export async function testDataAggregation(): Promise<boolean> {
 	try {
-		// Test single symbol signal generation
-		const btcSignal = await generateSignalForSymbol('BTC');
+		// Get top coins first to test with a valid coin
+		const topCoins = await getTopCoinsByAltRank(5);
 
-		if (!btcSignal || !btcSignal.metrics) {
-			throw new Error('Failed to generate BTC signal');
+		if (topCoins.length === 0) {
+			throw new Error('Failed to fetch top coins');
+		}
+
+		// Test single symbol signal generation with first top coin
+		const testCoin = topCoins[0];
+		const signal = await generateSignalForSymbol(testCoin.symbol);
+
+		if (!signal || !signal.metrics) {
+			throw new Error(`Failed to generate signal for ${testCoin.symbol}`);
 		}
 
 		// Test latest signals retrieval

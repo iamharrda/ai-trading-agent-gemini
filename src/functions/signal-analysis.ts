@@ -77,110 +77,97 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 			return jobId;
 		});
 
-		// Step 2: Get symbols to analyze
-		const symbolsToAnalyze = await step.run('get-symbols-list', async () => {
+		// Step 2 & 3 Combined: Select coins with complete data AND fetch metrics
+		const socialMetrics = await step.run('select-and-fetch-data', async () => {
 			await updateProgress(
 				2,
-				'Preparing Symbol List',
-				'Selecting cryptocurrencies for analysis...'
+				'Selecting Best Coins',
+				'Testing top 10 candidates for complete social data...'
 			);
 
-			const symbolCount = event.data.symbolCount || 5;
-			const symbols = event.data.symbols || ['BTC', 'ETH', 'SOL', 'ADA', 'DOT'];
-			const selectedSymbols = symbols.slice(0, symbolCount);
+			// Get candidate coins from trigger endpoint
+			const candidateCoins = event.data.topCoins || [];
 
-			await updateProgress(
-				2,
-				'Symbol Selection Complete',
-				`Selected ${
-					selectedSymbols.length
-				} cryptocurrencies: ${selectedSymbols.join(', ')}`
-			);
+			if (candidateCoins.length === 0) {
+				throw new Error('No candidate coins provided');
+			}
 
-			return selectedSymbols;
-		});
+			console.log(`Testing ${candidateCoins.length} candidate coins for data availability...`);
 
-		// Step 3: Fetch social metrics
-		const socialMetrics = await step.run('fetch-social-metrics', async () => {
-			await updateProgress(
-				3,
-				'Fetching Social Data',
-				`Gathering real-time sentiment from LunarCrush for ${symbolsToAnalyze.length} symbols...`
-			);
-
+			// Test each coin and collect those with complete data
 			const results = [];
 
-			for (let i = 0; i < symbolsToAnalyze.length; i++) {
-				const symbol = symbolsToAnalyze[i];
+			for (const coin of candidateCoins) {
+				// Stop once we have 3 coins with complete data
+				if (results.length >= 3) break;
+
 				try {
 					await updateProgress(
-						3,
-						'Fetching Social Data',
-						`Analyzing social metrics for ${symbol} (${i + 1}/${
-							symbolsToAnalyze.length
-						})...`
+						2,
+						'Testing Coin Data',
+						`Checking ${coin.symbol} (${results.length + 1}/3 found)...`
 					);
 
-					const metrics = await getSocialMetrics(symbol);
-					results.push({ symbol, metrics, success: true });
+					// Fetch social metrics
+					const metrics = await getSocialMetrics(coin);
 
-					// Rate limiting
-					await new Promise((resolve) => setTimeout(resolve, 1500));
+					// Check if we got real data (not all zeros)
+					if (metrics.mentions > 0 || metrics.interactions > 0 || metrics.creators > 0) {
+						console.log(`✅ ${coin.symbol} has complete data - selected!`, {
+							mentions: metrics.mentions,
+							interactions: metrics.interactions,
+							creators: metrics.creators
+						});
+						results.push({ symbol: coin.symbol, metrics, success: true });
+					} else {
+						console.log(`⚠️ ${coin.symbol} has no social data - skipping (all zeros)`);
+					}
 				} catch (error) {
-					console.error(`Failed to fetch social metrics for ${symbol}:`, error);
-					results.push({ symbol, metrics: null, success: false });
+					console.log(`❌ ${coin.symbol} failed data check - skipping`, error);
 				}
 			}
 
-			const successCount = results.filter((r) => r.success).length;
+			if (results.length === 0) {
+				throw new Error('No coins with complete social data found in top 10');
+			}
+
+			const selectedSymbols = results.map((r: any) => r.symbol).join(', ');
 
 			await updateProgress(
 				3,
-				'Social Data Complete',
-				`Fetched data for ${successCount}/${symbolsToAnalyze.length} cryptocurrencies`
+				'Selection Complete',
+				`Selected ${results.length} coins with complete metrics: ${selectedSymbols}`
 			);
 
 			return results;
 		});
 
-		// Step 4: Generate AI trading signals
+		// Step 4: Generate AI trading signals (PARALLEL - much faster!)
 		const tradingSignals = await step.run('generate-ai-signals', async () => {
 			await updateProgress(
 				4,
 				'AI Signal Generation',
-				'Google Gemini analyzing market sentiment and social patterns...'
+				'Google Gemini analyzing all coins in parallel...'
 			);
 
-			const signals: TradingSignal[] = [];
 			const successfulMetrics = socialMetrics.filter(
 				(result) => result.success && result.metrics
 			);
 
-			for (let i = 0; i < successfulMetrics.length; i++) {
-				const result = successfulMetrics[i];
-				try {
-					await updateProgress(
-						4,
-						'AI Signal Generation',
-						`AI analyzing ${result.symbol} (${i + 1}/${
-							successfulMetrics.length
-						})...`
-					);
+			// Generate ALL signals in parallel instead of sequential
+			// Skip historical metrics for speed - current data is sufficient for 3 coins
+			const signalPromises = successfulMetrics.map((result) =>
+				generateTradingSignal(result.symbol, result.metrics!, undefined)
+					.catch((error) => {
+						console.error(`AI analysis failed for ${result.symbol}:`, error);
+						return null;
+					})
+			);
 
-					const signal = await generateTradingSignal(
-						result.symbol,
-						result.metrics!,
-						[]
-					);
-
-					signals.push(signal);
-
-					// Rate limiting for Gemini
-					await new Promise((resolve) => setTimeout(resolve, 3000));
-				} catch (error) {
-					console.error(`AI analysis failed for ${result.symbol}:`, error);
-				}
-			}
+			// Wait for all signals to complete simultaneously
+			const signals = (await Promise.all(signalPromises)).filter(
+				(s): s is TradingSignal => s !== null
+			);
 
 			await updateProgress(
 				4,
@@ -275,9 +262,7 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 			await updateProgress(
 				7,
 				'Analysis Complete',
-				`Generated ${tradingSignals.length} trading signals in ${Math.round(
-					duration / 1000
-				)}s`,
+				`Generated ${tradingSignals.length} trading signals.`,
 				'completed'
 			);
 
