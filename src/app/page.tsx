@@ -188,15 +188,15 @@ const SignalCard: React.FC<{ signal: TradingSignal }> = ({ signal }) => {
 	return (
 		<div className='bg-gray-900/50 border border-gray-700/50 rounded-xl p-6 hover:border-gray-600/50 transition-all duration-300 hover:bg-gray-900/70'>
 			{/* Header */}
-			<div className='flex items-center justify-between mb-4'>
-				<div className='flex items-center space-x-3'>
-					<div className='w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center'>
-						<span className='text-blue-400 font-bold text-sm'>
-							{signal.symbol}
+			<div className='flex items-center justify-between gap-3 mb-4'>
+				<div className='flex items-center gap-3 overflow-hidden'>
+					<div className='w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center flex-shrink-0'>
+						<span className='text-blue-400 font-bold text-xs'>
+							{signal.symbol.slice(0, 4)}
 						</span>
 					</div>
-					<div>
-						<h3 className='text-white font-semibold text-lg'>
+					<div className='overflow-hidden'>
+						<h3 className='text-white font-semibold text-lg truncate'>
 							${signal.symbol}
 						</h3>
 						<p className='text-gray-400 text-sm'>
@@ -206,7 +206,7 @@ const SignalCard: React.FC<{ signal: TradingSignal }> = ({ signal }) => {
 				</div>
 
 				<div
-					className={`px-3 py-1.5 rounded-full border flex items-center space-x-2 ${getSignalColor(
+					className={`px-3 py-1.5 rounded-full border flex items-center space-x-2 flex-shrink-0 ${getSignalColor(
 						signal.signal
 					)}`}>
 					{getSignalIcon(signal.signal)}
