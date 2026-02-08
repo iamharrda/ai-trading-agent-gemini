@@ -3,6 +3,7 @@ import { generateSignalForSymbol } from '@/lib/signal-generator';
 import { getSocialMetrics } from '@/lib/lunarcrush';
 import { generateTradingSignal } from '@/lib/gemini';
 import { supabase } from '@/lib/supabase';
+import { sendSignalAlert } from '@/lib/telegram';
 import type { TradingSignal } from '@/types/trading';
 
 /**
@@ -253,6 +254,33 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 			};
 
 			return summary;
+		});
+
+		// Step 6.5: Send Telegram Notifications
+		await step.run('send-notifications', async () => {
+			const highConfidenceSignals = tradingSignals.filter(
+				(s) => s.confidence >= 70
+			);
+
+			if (highConfidenceSignals.length > 0) {
+				await updateProgress(
+					6,
+					'Sending Notifications',
+					`Sending ${highConfidenceSignals.length} high-confidence alerts to Telegram...`
+				);
+
+				const results = await Promise.allSettled(
+					highConfidenceSignals.map((signal) => sendSignalAlert(signal))
+				);
+
+				const sentCount = results.filter(
+					(r) => r.status === 'fulfilled' && r.value === true
+				).length;
+
+				console.log(
+					`Sent ${sentCount}/${highConfidenceSignals.length} Telegram alerts`
+				);
+			}
 		});
 
 		// Step 7: Complete analysis
