@@ -17,8 +17,12 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 		const startTime = Date.now();
 		const jobId = event.data.jobId;
 
+		console.log(`[Job:${jobId}] Starting signal analysis workflow`, { eventData: event.data });
+
 		if (!jobId) {
-			throw new Error('No job ID provided in event data');
+			const error = new Error('No job ID provided in event data');
+			console.error(`[Job:Missing] Critical error:`, error);
+			throw error;
 		}
 
 		const updateProgress = async (
@@ -28,6 +32,8 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 			status: string = 'started'
 		) => {
 			const progressPercentage = Math.round((stepNumber / 7) * 100);
+
+			console.log(`[Job:${jobId}] Step ${stepNumber}/7: ${stepName} - ${status}`);
 
 			const updateData = {
 				current_step: stepName,
@@ -45,15 +51,16 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 					.select();
 
 				if (error) {
-					console.error(`Failed to update progress for job ${jobId}:`, error);
+					console.error(`[Job:${jobId}] Failed to update DB progress:`, error);
 				}
 			} catch (error) {
-				console.error('Exception during progress update:', error);
+				console.error(`[Job:${jobId}] Exception during DB update:`, error);
 			}
 		};
 
 		// Step 1: Initialize analysis job
 		await step.run('initialize-job', async () => {
+			console.log(`[Job:${jobId}] Step 1: Initializing job record`);
 			const jobData = {
 				id: jobId,
 				status: 'started',
@@ -71,7 +78,7 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 				.select();
 
 			if (error) {
-				console.error('Job creation failed:', error);
+				console.error(`[Job:${jobId}] Job creation failed:`, error);
 				throw error;
 			}
 
@@ -80,6 +87,7 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 
 		// Step 2 & 3 Combined: Select coins with complete data AND fetch metrics
 		const socialMetrics = await step.run('select-and-fetch-data', async () => {
+			console.log(`[Job:${jobId}] Step 2/3: Selecting coins and fetching data`);
 			await updateProgress(
 				2,
 				'Selecting Best Coins',
@@ -93,7 +101,7 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 				throw new Error('No candidate coins provided');
 			}
 
-			console.log(`Testing ${candidateCoins.length} candidate coins for data availability...`);
+			console.log(`[Job:${jobId}] Testing ${candidateCoins.length} candidate coins for data availability...`);
 
 			// Test each coin and collect those with complete data
 			const results = [];
@@ -110,21 +118,22 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 					);
 
 					// Fetch social metrics
+					console.debug(`[Job:${jobId}] Fetching metrics for ${coin.symbol}`);
 					const metrics = await getSocialMetrics(coin);
 
 					// Check if we got real data (not all zeros)
 					if (metrics.mentions > 0 || metrics.interactions > 0 || metrics.creators > 0) {
-						console.log(`✅ ${coin.symbol} has complete data - selected!`, {
+						console.log(`[Job:${jobId}] ✅ ${coin.symbol} has complete data - selected!`, {
 							mentions: metrics.mentions,
 							interactions: metrics.interactions,
 							creators: metrics.creators
 						});
 						results.push({ symbol: coin.symbol, metrics, success: true });
 					} else {
-						console.log(`⚠️ ${coin.symbol} has no social data - skipping (all zeros)`);
+						console.log(`[Job:${jobId}] ⚠️ ${coin.symbol} has no social data - skipping (all zeros)`);
 					}
 				} catch (error) {
-					console.log(`❌ ${coin.symbol} failed data check - skipping`, error);
+					console.warn(`[Job:${jobId}] ❌ ${coin.symbol} failed data check - skipping`, error);
 				}
 			}
 
@@ -133,6 +142,8 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 			}
 
 			const selectedSymbols = results.map((r: any) => r.symbol).join(', ');
+
+			console.log(`[Job:${jobId}] Selection complete. Selected: ${selectedSymbols}`);
 
 			await updateProgress(
 				3,
@@ -145,6 +156,7 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 
 		// Step 4: Generate AI trading signals (PARALLEL - much faster!)
 		const tradingSignals = await step.run('generate-ai-signals', async () => {
+			console.log(`[Job:${jobId}] Step 4: Generating AI signals`);
 			await updateProgress(
 				4,
 				'AI Signal Generation',
@@ -160,7 +172,7 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 			const signalPromises = successfulMetrics.map((result) =>
 				generateTradingSignal(result.symbol, result.metrics!, undefined)
 					.catch((error) => {
-						console.error(`AI analysis failed for ${result.symbol}:`, error);
+						console.error(`[Job:${jobId}] AI analysis failed for ${result.symbol}:`, error);
 						return null;
 					})
 			);
@@ -169,6 +181,8 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 			const signals = (await Promise.all(signalPromises)).filter(
 				(s): s is TradingSignal => s !== null
 			);
+
+			console.log(`[Job:${jobId}] Generated ${signals.length} signals`);
 
 			await updateProgress(
 				4,
@@ -181,6 +195,7 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 
 		// Step 5: Save signals to database
 		const savedSignals = await step.run('save-to-database', async () => {
+			console.log(`[Job:${jobId}] Step 5: Saving signals to DB`);
 			await updateProgress(
 				5,
 				'Saving Results',
@@ -212,16 +227,19 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 						`Saved ${i + 1}/${tradingSignals.length} signals to database...`
 					);
 				} catch (error) {
-					console.error(`Failed to save signal for ${signal.symbol}:`, error);
+					console.error(`[Job:${jobId}] Failed to save signal for ${signal.symbol}:`, error);
 					saveResults.push({ symbol: signal.symbol, success: false });
 				}
 			}
+
+			console.log(`[Job:${jobId}] Saved ${saveResults.filter(r => r.success).length}/${saveResults.length} signals`);
 
 			return saveResults;
 		});
 
 		// Step 6: Generate analysis summary
 		const summary = await step.run('generate-summary', async () => {
+			console.log(`[Job:${jobId}] Step 6: Generating summary`);
 			await updateProgress(
 				6,
 				'Generating Summary',
@@ -253,6 +271,8 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 					})),
 			};
 
+			console.log(`[Job:${jobId}] Summary generated`, summary);
+
 			return summary;
 		});
 
@@ -263,6 +283,7 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 			);
 
 			if (highConfidenceSignals.length > 0) {
+				console.log(`[Job:${jobId}] Step 6.5: Sending Telegram notifications`);
 				await updateProgress(
 					6,
 					'Sending Notifications',
@@ -278,14 +299,17 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 				).length;
 
 				console.log(
-					`Sent ${sentCount}/${highConfidenceSignals.length} Telegram alerts`
+					`[Job:${jobId}] Sent ${sentCount}/${highConfidenceSignals.length} Telegram alerts`
 				);
+			} else {
+				console.log(`[Job:${jobId}] No high confidence signals for notifications`);
 			}
 		});
 
 		// Step 7: Complete analysis
 		await step.run('complete-job', async () => {
 			const duration = Date.now() - startTime;
+			console.log(`[Job:${jobId}] Step 7: completing job. Duration: ${duration}ms`);
 
 			await updateProgress(
 				7,
@@ -308,10 +332,10 @@ export const signalAnalysisWorkflow = inngest.createFunction(
 					.select();
 
 				if (error) {
-					console.error('Failed to update final job statistics:', error);
+					console.error(`[Job:${jobId}] Failed to update final job statistics:`, error);
 				}
 			} catch (error) {
-				console.error('Exception updating final job statistics:', error);
+				console.error(`[Job:${jobId}] Exception updating final job statistics:`, error);
 			}
 		});
 
