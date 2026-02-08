@@ -28,3 +28,16 @@ export const saveSignal = async (signal: any): Promise<void> => {
 		throw new Error(`Failed to save signal: ${error.message}`);
 	}
 };
+/**
+ * Test Supabase connection
+ */
+export const testSupabaseConnection = async (): Promise<boolean> => {
+	try {
+		// Simple query to check connection
+		const { error } = await supabase.from('analysis_jobs').select('count', { count: 'exact', head: true });
+		return !error;
+	} catch (error) {
+		console.error('Supabase connection test failed:', error);
+		return false;
+	}
+};

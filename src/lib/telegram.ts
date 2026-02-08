@@ -64,3 +64,20 @@ ${emoji} <b>${signal.signal} SIGNAL: ${signal.symbol}</b>
 
     return sendTelegramMessage(message);
 }
+/**
+ * Test Telegram Bot connection
+ */
+export async function testTelegramConnection(): Promise<boolean> {
+    if (!TELEGRAM_BOT_TOKEN) return false;
+
+    try {
+        const response = await fetch(
+            `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe`
+        );
+        const data = await response.json();
+        return data.ok;
+    } catch (error) {
+        console.error('Telegram connection test failed:', error);
+        return false;
+    }
+}
